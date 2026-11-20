@@ -14,14 +14,15 @@ def calculate_returns(rewards, gamma=0.99):
         returns[t] = G
     return returns
 
+
 def get_action(probs : torch.Tensor):
     probs = probs
     distribution = torch.distributions.Categorical(probs=probs)
     action = distribution.sample()
     return action
 
-def run(num_episodes = 50, device="cpu", num_policy_updates = 5, lr = 0.01, num_value_updates = 1):
-    all_rewards = []
+def run(num_episodes = 50, device="cpu", num_policy_updates = 5, lr = 0.01):
+    rewards = []
     policy_model = policy_NET(device=device)
     value_model = value_NET(device = device)
     # optimizer = torch.optim.SGD(model.parameters(), lr = lr)
@@ -40,48 +41,34 @@ def run(num_episodes = 50, device="cpu", num_policy_updates = 5, lr = 0.01, num_
             # we need to reset the tajectories since the policy updates
 
             policy_optimizer.zero_grad()
-
+            value_optimizer.zero_grad()
 
             # loss calculation
-            logprobs = []
-            s, values, rewards = [], [], []
+            sub_sums = []
+            sub_state, sub_reward = [], []
             for trajectory_index in range(len(trajectories)): # (length_trajectory, 3)
                 trajectory = trajectories[trajectory_index] # list of tuples
 
                 log_probs = torch.stack([l for s,r,l in trajectory]).to(device=device)
-                
                 traj_rewards = torch.stack([r for s,r,l in trajectory]).to(device=device)
                 discounted_returns = calculate_returns(traj_rewards)
-                
                 states = torch.stack([s for s,r,l in trajectory]).to(device=device)
-                
                 state_values = value_model(states).squeeze(-1)
 
-                s.append(states)
-                values.append(state_values)
-                rewards.append(discounted_returns)
-                logprobs.append(log_probs)
+                sub_sums.append(torch.sum(log_probs * (discounted_returns.detach() - state_values.detach())))
+                sub_state.append(state_values)
+                sub_reward.append(discounted_returns)
 
-                
-
-            s, values, rewards = torch.cat(s), torch.cat(values), torch.cat(rewards)
-            logprobs, phi = torch.cat(logprobs), (rewards.detach() - values.detach())
-            assert values.shape == rewards.shape == logprobs.shape, (values.shape, rewards.shape, logprobs.shape)
+            policy_loss =  - torch.mean(torch.stack(sub_sums))
+            value_loss = torch.mean((torch.cat(sub_state) - torch.cat(sub_reward)) ** 2 )
 
 
-
-            policy_loss = - torch.sum(logprobs * phi)/len(trajectories)
+            # backwards
             policy_loss.backward()
+            value_loss.backward()
+
             policy_optimizer.step()
-
-
-            for _ in range(num_value_updates):
-
-                value_optimizer.zero_grad()
-                preds = value_model(s).squeeze(-1)
-                value_loss = torch.mean((preds-rewards) ** 2 )
-                value_loss.backward()
-                value_optimizer.step()
+            value_optimizer.step()
 
             trajectories = []
 
@@ -108,12 +95,12 @@ def run(num_episodes = 50, device="cpu", num_policy_updates = 5, lr = 0.01, num_
             episode_reward += float(reward)
             
             if terminated or truncated:
-                all_rewards.append(episode_reward)
+                rewards.append(episode_reward)
                 trajectories.append(current_trajetory) # list(2 tensor elsement lists)
                 break
 
     print("DONE")
-    return all_rewards
+    return rewards
 
 
 if __name__=="__main__":

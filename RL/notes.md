@@ -22,16 +22,3 @@
 #### Optimizers and normalizing returns
 
 - On sgd, the longer the episode the bigger the gradient, so one long episode produces a huge action, which push the softmax to always choose one action
-
-- it is interesting to normalize phi_t over the batch. 
-```python
-all_lp, all_G = [], []
-for trajectory in trajectories:
-    all_lp.append(torch.stack([l for r, l in trajectory]))
-    all_G.append(calculate_returns(torch.stack([r for r, l in trajectory])))
-G = torch.cat(all_G)
-G = (G - G.mean()) / (G.std() + 1e-8)          # normalize returns across the batch
-loss = -(torch.cat(all_lp) * G).sum() / len(trajectories)
-```
-
-- when phi is estimated by adding a baseline value function, the value functin itself should be trained over the whole batch (self contained training loop) careful not to overfit
